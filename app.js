@@ -1,3 +1,39 @@
+// --- FIREBASE INITIALIZATION ---
+let db = null;
+let isFirebaseEnabled = false;
+
+function initFirebase(config) {
+    if (!config || !config.apiKey || config.apiKey === "YOUR_API_KEY") return;
+    
+    try {
+        if (firebase.apps.length === 0) {
+            firebase.initializeApp(config);
+            db = firebase.firestore();
+            
+            // Enable Offline Persistence for Firestore
+            db.enablePersistence().catch((err) => {
+                if (err.code == 'failed-precondition') {
+                    console.warn("Persistence failed: Multiple tabs open");
+                } else if (err.code == 'unimplemented') {
+                    console.warn("Persistence not supported by browser");
+                }
+            });
+
+            isFirebaseEnabled = true;
+            console.log("Firebase initialized with persistence");
+        }
+    } catch (err) {
+        console.error("Firebase Init Error:", err);
+    }
+}
+
+// Load initial config from localStorage if exists
+const tempSettings = JSON.parse(localStorage.getItem('arkpos_settings')) || {};
+if (tempSettings.firebaseConfig) {
+    initFirebase(tempSettings.firebaseConfig);
+}
+
+
 const i18n = {
     en: {
         app_title: "Ali Raza Kiryana",
@@ -84,6 +120,9 @@ class Store {
     constructor() {
         this.prefix = 'arkpos_';
         this.init();
+        if (isFirebaseEnabled) {
+            this.syncWithCloud();
+        }
     }
 
     init() {
@@ -139,7 +178,48 @@ class Store {
 
     save(key, data) {
         localStorage.setItem(this.prefix + key, JSON.stringify(data));
+        
+        // Sync to Cloud
+        if (isFirebaseEnabled && db) {
+            db.collection("pos_data").doc(key).set({
+                data: JSON.stringify(data),
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }).catch(err => {
+                console.error("Cloud Save Error:", err);
+                // Persistence handles offline, but we log the error
+            });
+        }
     }
+
+    async syncWithCloud() {
+        if (!isFirebaseEnabled || !db) return;
+        
+        console.log("Syncing with cloud...");
+        try {
+            const snapshot = await db.collection("pos_data").get();
+            if (snapshot.empty) {
+                console.log("No cloud data found to sync.");
+                return;
+            }
+
+            snapshot.forEach(doc => {
+                const key = doc.id;
+                const cloudData = JSON.parse(doc.data().data);
+                const localData = JSON.parse(localStorage.getItem(this.prefix + key));
+
+                // Basic merge: if local doesn't exist, use cloud.
+                // In a real app, you'd compare updatedAt timestamps.
+                if (!localData) {
+                    localStorage.setItem(this.prefix + key, JSON.stringify(cloudData));
+                }
+            });
+            console.log("Cloud sync complete");
+        } catch (err) {
+            console.error("Cloud Sync Error:", err);
+            throw err; // Propagate to UI for toast
+        }
+    }
+
 
     // Products
     addProduct(product) {
@@ -344,51 +424,59 @@ class Store {
         const brands = ['Nestle', 'National', 'Shan', 'Dalda', 'Sufi', 'Tang', 'Tapal', 'Lipton', 'Pepsi', 'Coke', 'Lays', 'Kurkure', 'Sooper', 'Lifebuoy', 'Lux', 'SafeGuard', 'Arial', 'Surf Excel'];
         const types = ['Regular', 'Premium', 'Special', 'Saver Pack', 'Value Pack', 'Small', 'Large', 'Extra', 'Family', 'Mini'];
 
-        let products = [];
+        const productsGrouped = {};
         let idCount = 1000;
 
         for (let cat in categories) {
             categories[cat].forEach(item => {
-                products.push({
-                    id: (idCount++).toString(),
-                    name: item.n,
-                    category: cat,
-                    isWeighted: item.w || false,
-                    variants: [{
-                        size: item.s,
-                        price: item.p,
-                        stock: 100,
-                        minStock: 5,
-                        barcode: (Math.floor(100000 + Math.random() * 900000)).toString()
-                    }]
+                if (!productsGrouped[item.n]) {
+                    productsGrouped[item.n] = {
+                        id: (idCount++).toString(),
+                        name: item.n,
+                        category: cat,
+                        isWeighted: item.w || false,
+                        variants: []
+                    };
+                }
+                productsGrouped[item.n].variants.push({
+                    size: item.s,
+                    price: item.p,
+                    stock: Math.floor(Math.random() * 50) + 50,
+                    minStock: 5,
+                    barcode: (Math.floor(100000 + Math.random() * 900000)).toString()
                 });
             });
         }
 
-        // Fill up to 200
-        while (products.length < 200) {
+        let products = Object.values(productsGrouped);
+
+        // Fill up to ~200 items by adding more variants or related products
+        while (products.length < 150) {
             const base = products[Math.floor(Math.random() * products.length)];
             const brand = brands[Math.floor(Math.random() * brands.length)];
-            const type = types[Math.floor(Math.random() * types.length)];
-            products.push({
-                id: (idCount++).toString(),
-                name: `${base.name} - ${type}`,
-                category: base.category,
-                isWeighted: base.isWeighted,
-                variants: [{
-                    size: base.variants[0].size,
-                    price: base.variants[0].price + (Math.floor(Math.random() * 50)),
-                    stock: 50,
-                    minStock: 5,
-                    barcode: (Math.floor(100000 + Math.random() * 900000)).toString()
-                }]
-            });
+            const newName = `${brand} ${base.name}`;
+            if (!productsGrouped[newName]) {
+                products.push({
+                    id: (idCount++).toString(),
+                    name: newName,
+                    category: base.category,
+                    isWeighted: base.isWeighted,
+                    variants: [{
+                        size: base.variants[0].size,
+                        price: base.variants[0].price + (Math.floor(Math.random() * 20) - 10),
+                        stock: 50,
+                        minStock: 5,
+                        barcode: (Math.floor(100000 + Math.random() * 900000)).toString()
+                    }]
+                });
+            }
         }
 
         this.save('products', products);
         this.save('categories', Object.keys(categories));
     }
 }
+
 
 const store = new Store();
 
@@ -904,31 +992,65 @@ const UI = {
         `);
     },
 
-    startScanner(target) {
-        this.showModal('Scanner', `
-            <div id="reader" style="width: 100%; min-height: 250px; background:#000;"></div>
-            <p style="text-align:center; font-size:0.8rem; padding:10px;">Scan items to search or add barcode.</p>
+    async startScanner(target) {
+        this.showModal('Scanner Ready', `
+            <div id="reader" style="width: 100%; min-height: 250px; background:#000; border-radius: var(--radius-md); overflow: hidden;"></div>
+            <div style="text-align:center; padding:15px;">
+                <p style="font-weight:600; font-size:0.9rem;">Aim at Barcode / QR Code</p>
+                <p style="font-size:0.75rem; color:var(--text-muted);">Ensure good lighting</p>
+                <button class="btn-primary" style="background:var(--danger); margin-top:10px; width:auto; padding:5px 15px;" onclick="UI.stopScanner()">Cancel</button>
+            </div>
         `);
 
-        this.scanner = new Html5Qrcode("reader");
-        const config = { fps: 10, qrbox: { width: 250, height: 150 } };
+        try {
+            // Check for camera support
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error("Camera not supported on this browser/device");
+            }
 
-        this.scanner.start({ facingMode: "environment" }, config, (decodedText) => {
-            this.stopScanner();
-            this.handleScanResult(target, decodedText);
-        }).catch(err => {
-            this.showToast('Camera error');
+            // Request permission explicitly first for mobile
+            await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            
+            this.scanner = new Html5Qrcode("reader");
+            const config = { 
+                fps: 10, 
+                qrbox: { width: 250, height: 180 },
+                aspectRatio: 1.0 
+            };
+
+            await this.scanner.start(
+                { facingMode: "environment" }, 
+                config, 
+                (decodedText) => {
+                    this.stopScanner();
+                    this.handleScanResult(target, decodedText);
+                }
+            );
+        } catch (err) {
+            console.error("Scanner Error:", err);
+            let msg = "Camera Error";
+            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                msg = "Camera permission denied. Please allow camera access in settings.";
+            } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                msg = "No camera found on this device.";
+            }
+            this.showToast(msg);
             this.hideModal();
-        });
-    },
-
-    stopScanner() {
-        if (this.scanner) {
-            this.scanner.stop().then(() => {
-                this.hideModal();
-            });
         }
     },
+
+    async stopScanner() {
+        if (this.scanner) {
+            try {
+                await this.scanner.stop();
+                this.scanner = null;
+            } catch (e) {
+                console.warn("Stop scanner error:", e);
+            }
+        }
+        this.hideModal();
+    },
+
 
     handleScanResult(target, barcode) {
         if (target === 'bill') {
@@ -1004,42 +1126,82 @@ const UI = {
         }
 
         const products = store.get('products');
-        const filtered = products.filter(p => {
+        
+        // Grouping items by name to show only one entry per product in search results
+        const grouped = {};
+        products.forEach(p => {
             const matchesSearch = p.name.toLowerCase().includes(val.toLowerCase());
             const matchesCat = !catFilter || p.category === catFilter;
-            return matchesSearch && matchesCat;
+            
+            if (matchesSearch && matchesCat) {
+                if (!grouped[p.name]) {
+                    grouped[p.name] = {
+                        name: p.name,
+                        category: p.category,
+                        count: 1
+                    };
+                } else {
+                    grouped[p.name].count++;
+                }
+            }
         });
+
+        const filtered = Object.values(grouped);
         
         if (filtered.length === 0) {
-            results.innerHTML = '<p style="font-size:0.8rem; color:var(--text-muted);">No items</p>';
+            results.innerHTML = '<p style="font-size:0.8rem; color:var(--text-muted); padding:10px;">No items found</p>';
         } else {
             results.innerHTML = filtered.map(p => `
-                <div class="search-result-item" style="padding:0.5rem; border-bottom:1px solid var(--border); cursor:pointer;" onclick="UI.showSizeSelector('${p.id}')">
-                    <p style="font-weight:600;">${p.name}</p>
-                    <p style="font-size:0.75rem; color:var(--text-muted);">${p.category}</p>
+                <div class="search-result-item" style="padding:0.75rem; border-bottom:1px solid var(--border); cursor:pointer;" onclick="UI.showSizeSelectorByName('${p.name.replace(/'/g, "\\'")}')">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <p style="font-weight:600; margin:0;">${p.name}</p>
+                            <p style="font-size:0.7rem; color:var(--text-muted); margin:0;">${p.category}</p>
+                        </div>
+                        <span class="badge" style="background:var(--bg-main); color:var(--text-main); border:1px solid var(--border);">${p.count} ${p.count > 1 ? 'Sizes' : 'Size'}</span>
+                    </div>
                 </div>
             `).join('');
         }
         results.classList.remove('hidden');
     },
 
-    showSizeSelector(id) {
-        const p = store.get('products').find(prod => prod.id === id);
+
+    showSizeSelectorByName(name) {
+        const products = store.get('products').filter(p => p.name === name);
+        if (products.length === 0) return;
+
         document.getElementById('bill-search-results').classList.add('hidden');
         document.getElementById('bill-search').value = '';
 
-        if (p.isWeighted) {
-            this.showWeightModal(p);
+        // If it's a weighted item, handle specifically (assuming if any is weighted, the product is weighted)
+        const weightedProduct = products.find(p => p.isWeighted);
+        if (weightedProduct) {
+            this.showWeightModal(weightedProduct);
             return;
         }
 
-        if (p.variants.length === 1) {
-            this.addToCart(p, p.variants[0]);
+        // Collect all variants across similar items
+        let allVariants = [];
+        products.forEach(p => {
+            p.variants.forEach(v => {
+                allVariants.push({
+                    pid: p.id,
+                    size: v.size,
+                    price: v.price
+                });
+            });
+        });
+
+        if (allVariants.length === 1) {
+            const p = products.find(prod => prod.id === allVariants[0].pid);
+            const v = p.variants.find(varnt => varnt.size === allVariants[0].size);
+            this.addToCart(p, v);
         } else {
-            this.showModal('Select Size', `
+            this.showModal(`Select size for ${name}`, `
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
-                    ${p.variants.map(v => `
-                        <button class="card" onclick="UI.addToCartById('${id}', '${v.size}')" style="text-align:center;">
+                    ${allVariants.map(v => `
+                        <button class="card" onclick="UI.addToCartById('${v.pid}', '${v.size}')" style="text-align:center;">
                             <p style="font-weight:700;">${v.size}</p>
                             <p style="color:var(--success);">Rs. ${v.price}</p>
                         </button>
@@ -1299,14 +1461,41 @@ const UI = {
                 <button class="btn-primary" onclick="UI.shareWhatsAppById('${bill.id}', ${remaining}, 'ur')" style="background:#25D366; font-size:0.85rem;">
                     <i class="fa-brands fa-whatsapp"></i> WhatsApp (اردو)
                 </button>
-                <button class="btn-primary" onclick="UI.doPrintBill()">
-                    <i class="fa-solid fa-print"></i> Print PDF
+                <button class="btn-primary" id="download-btn" onclick="UI.downloadReceipt('${bill.id}')" style="background:var(--primary);">
+                    <i class="fa-solid fa-download"></i> Download Bill
                 </button>
                 <button class="btn-primary" onclick="UI.shareDirectById('${bill.id}', ${remaining})" style="background:var(--info);">
                     <i class="fa-solid fa-share-nodes"></i> Share
                 </button>
             </div>
         `);
+    },
+
+    downloadReceipt(billId) {
+        const btn = document.getElementById('download-btn');
+        btn.innerText = 'Downloading...';
+        btn.disabled = true;
+
+        const content = document.getElementById('receipt-content');
+        
+        html2canvas(content, {
+            backgroundColor: '#ffffff',
+            scale: 2, // Higher quality
+            useCORS: true
+        }).then(canvas => {
+            const link = document.createElement('a');
+            link.download = `receipt-${billId.slice(-6)}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            
+            btn.innerHTML = '<i class="fa-solid fa-check"></i> Downloaded';
+            this.showToast('Receipt Saved to Gallery');
+        }).catch(err => {
+            console.error(err);
+            this.showToast('Download Failed');
+            btn.innerHTML = '<i class="fa-solid fa-download"></i> Try Again';
+            btn.disabled = false;
+        });
     },
 
     shareWhatsAppById(billId, remaining, lang = 'en') {
@@ -1484,6 +1673,49 @@ const UI = {
                 </div>
             </div>
             
+            <div class="card">
+                <h3 style="display:flex; justify-content:space-between; align-items:center;">
+                    Cloud Sync (Firestore)
+                    <span class="badge ${isFirebaseEnabled ? 'badge-success' : 'badge-danger'}" style="font-size:0.75rem;">
+                        ${isFirebaseEnabled ? 'Live Sync' : 'Offline'}
+                    </span>
+                </h3>
+                <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:1rem;">
+                    Sync your store items, khatas, and bills to the Google Cloud for free.
+                </p>
+                <div style="background:var(--bg-main); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border); font-size:0.75rem; margin-bottom:1rem;">
+                    <p style="font-weight:700; margin-bottom:5px;">Firebase Free Plan (Spark):</p>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.25rem;">
+                        <span>Data Limit:</span><span style="text-align:right; font-weight:600;">1 GB</span>
+                        <span>Read Limit:</span><span style="text-align:right; font-weight:600;">50k / day</span>
+                        <span>Write Limit:</span><span style="text-align:right; font-weight:600;">20k / day</span>
+                    </div>
+                </div>
+
+
+                ${!isFirebaseEnabled ? `
+                    <div class="form-group" style="margin-top:1rem;">
+                        <label style="font-size:0.7rem;">API Key</label>
+                        <input type="text" id="fb-apiKey" class="form-input" placeholder="Paste API Key">
+                        <label style="font-size:0.7rem;">Project ID</label>
+                        <input type="text" id="fb-projectId" class="form-input" placeholder="Paste Project ID">
+                        <button class="btn-primary" style="margin-top:0.5rem; background:var(--primary);" onclick="UI.saveFirebaseConfig()">
+                            <i class="fa-solid fa-plug"></i> Connect & Save
+                        </button>
+                    </div>
+                ` : `
+                    <button class="btn-primary" style="background:var(--success); font-size:0.85rem;" onclick="UI.syncCloudManual()">
+                        <i class="fa-solid fa-cloud-arrow-down"></i> Sync from Cloud
+                    </button>
+                    <button class="btn-primary" style="background:var(--danger); font-size:0.85rem; margin-top:0.5rem;" onclick="UI.disconnectFirebase()">
+                        Disconnect Firebase
+                    </button>
+
+
+                `}
+
+            </div>
+
             <div class="card">
                 <h3>Backup & Restore</h3>
                 <div class="storage-info">
@@ -1855,7 +2087,58 @@ const UI = {
             this.showToast('200+ Items Loaded!');
             this.renderView('products');
         }
+    },
+
+    saveFirebaseConfig() {
+        const apiKey = document.getElementById('fb-apiKey').value.trim();
+        const projectId = document.getElementById('fb-projectId').value.trim();
+        
+        if (!apiKey || !projectId) return this.showToast('Fill all fields');
+
+        const settings = store.get('settings');
+        settings.firebaseConfig = {
+            apiKey: apiKey,
+            projectId: projectId,
+            authDomain: `${projectId}.firebaseapp.com`,
+            storageBucket: `${projectId}.appspot.com`,
+            messagingSenderId: "123456789", // Dummy
+            appId: "1:123456789:web:abcdef" // Dummy
+        };
+        
+        store.save('settings', settings);
+        this.showToast('Config Saved! Reloading app...');
+        setTimeout(() => location.reload(), 2000);
+    },
+
+    async syncCloudManual() {
+        const btn = event.target.closest('button');
+        const originalHTML = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Syncing...';
+        btn.disabled = true;
+
+        try {
+            await store.syncWithCloud();
+            this.showToast('Cloud Sync Successful');
+            this.renderView('settings');
+        } catch (err) {
+            this.showToast('Sync Error: ' + err.message);
+        } finally {
+            btn.innerHTML = originalHTML;
+            btn.disabled = false;
+        }
+    },
+
+    disconnectFirebase() {
+        if (confirm('Are you sure you want to disconnect Cloud Sync? Your local data will remain.')) {
+            const settings = store.get('settings');
+            delete settings.firebaseConfig;
+            store.save('settings', settings);
+            this.showToast('Firebase Disconnected. Reloading...');
+            setTimeout(() => location.reload(), 1500);
+        }
     }
+
+
 };
 
 UI.init();
