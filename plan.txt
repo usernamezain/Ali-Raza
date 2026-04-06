@@ -1,0 +1,23 @@
+create a html , css and js based app that is buld for shopers in pakistan ..
+
+it has several pages and fetures for creating biils , storing items writing somones khata and even if someone is not paid full list them in udhar line it has money left to paid like this 
+
+in adding product page user can add product name like lays and then theri price and also its size its bigger or smaller 
+like if selects drink he can add the colddrinks by size also he can write prize like if he wnat to add a cold drink he will set the name coke cola and its price 200/60/150 accordng to its size its 1.5Ml or smaller in reguler or  in 2Ml like this add all the sizes so user can select and user can select the category for the product he add its in masalas , dals, chawals or alse he is in coldrinks , chips like this its condetenors categories like soaps , washing powder , shampos , or other thngs that si availebl in kiryana stores got it u can serch on internet about categories and se can add the product by categories and user can even after ading a product he can edit them as he want so he can change its price again this is product section got it use local storage to do this thing got it 
+
+
+
+next section is billing section 
+for the billing user has a serch bar that also has filtering user can select the item by serching very fast as he types and then when he taps on it add it to the billing of the user user will write biling user name and its number cusotmer i mean customer detal name and number got it and for the next thing they will add products when a product added it wil show increment and decrement it will live update whne user click on plus to see the 2 of quantity f that product it can see the live toatal even shop owner can give them discout and see the rice lke 3% disccount like this and shop kepper even write how much he paid when he write thsi how much he paid and save the bill then send that user to the new page name with unpaid or remaning money where he will be listed his items how much he paid and how much keft tp pay or not payed yet 
+and in save option shopkeper can send a whatsapp text based messages accordint to products and theri rs to the numer that it will enter there will be a blob link of ehatsap so he can share got it and there will be also a save as pdf or save as image option it will save it as a pdf and image got it and for the next it will auto maticaly add this line in bottom thank you please come again by ali raza kryana store
+
+
+and for the khata page there will be like wisely a fully funtionality for customer shopkeper write their khata add products to their khata and see the khatas history everything when someones khata is completed send them to new page completed khatas or history of khata got it ,, and sopkeper can open anyones khata by their name , number , theri adress got it
+
+
+and this app has a page of reminders when shopkepper sset an reminder to remind him to get money from customer it wil send a notification to the shopkeper aloow the notification setting s got it so it can send messages . and it can run time until shop keper time and day comes to remind it ...
+
+
+this app ahs a setting options where he can select theme default theme will be classic and white and black ut it has a toggle in settings it als show how muc local stprage is accupied and it has import and export the .json of khatas got it and also can w eextend this memory to go beyong the limits i mean i will conert this web pages ito app after its complete so make sure ts mobile full responsive and smooth got it so i have no problem got it 
+
+now start working on it 
