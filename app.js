@@ -1052,7 +1052,9 @@ const UI = {
     },
 
 
-    handleScanResult(target, barcode) {
+    handleScanResult(target, scanResult) {
+        const barcode = scanResult.trim(); // Trim whitespace to prevent "not found"
+        
         if (target === 'bill') {
             const products = store.get('products');
             let found = null;
@@ -1060,7 +1062,8 @@ const UI = {
             
             products.forEach(p => {
                 p.variants.forEach(v => {
-                    if (v.barcode === barcode) {
+                    // Using String() comparison to ensure types match
+                    if (String(v.barcode).trim() === barcode) {
                         found = p;
                         variantMatched = v;
                     }
@@ -1071,16 +1074,16 @@ const UI = {
                 this.addToCart(found, variantMatched);
                 this.showToast(`Added ${found.name}`);
             } else {
-                this.showToast('Item not found');
+                this.showToast(`Item not found: ${barcode}`);
             }
         } else if (target.startsWith('edit-p-barcode') || target.startsWith('p-barcode')) {
-            // This part is tricky because it's a dynamic input. 
-            // In a real app we'd target by ID or index.
             this.showToast(`Scanned: ${barcode}`);
-            const input = document.querySelector(`input[value="${barcode}"]`) || document.querySelector('.edit-p-barcode');
+            // Target the specific active input usually found by target ID or context
+            const input = document.getElementById(target);
             if (input) input.value = barcode;
         }
     },
+
 
     updateProduct(id) {
         const name = document.getElementById('edit-p-name').value;
@@ -2042,44 +2045,63 @@ const UI = {
         if (!code) return this.showToast('Enter a code first');
         
         this.showModal('QR Code Preview', `
-            <div id="qrcode-print-area" class="barcode-preview" style="display: flex; flex-direction: column; align-items: center;">
-                <h4 style="margin-bottom:5px;">${name}</h4>
-                <p style="font-size:0.8rem; margin-bottom:10px;">Size: ${size}</p>
-                <div id="qrcode-canvas" style="padding:10px; background:white;"></div>
+            <div id="qrcode-download-area" class="barcode-preview" style="display: flex; flex-direction: column; align-items: center; padding: 20px; background: white; border-radius: 10px;">
+                <h3 style="margin-bottom:5px; color: #333;">${store.get('settings').storeName || 'Kiryana Store'}</h3>
+                <h4 style="margin-bottom:5px; color: #555;">${name}</h4>
+                <p style="font-size:0.85rem; margin-bottom:10px; color: #777;">Size: ${size} | Price: Rs. ${code}</p>
+                <div id="qrcode-canvas" style="padding:15px; background:white; border: 1px solid #eee;"></div>
+                <p style="font-size:0.7rem; margin-top:10px; color: #999;">Scan to add to bill</p>
             </div>
-            <button class="btn-primary" onclick="UI.doPrintQRCode()" style="margin-top:1rem;">
-                <i class="fa-solid fa-print"></i> Print QR
+            <button class="btn-primary" id="qr-download-btn" onclick="UI.downloadQRCode('${name}', '${size}')" style="margin-top:1.5rem; background: var(--primary);">
+                <i class="fa-solid fa-download"></i> Download QR Image
             </button>
         `);
 
-        // Use setTimeout to ensure the modal DOM is ready
         setTimeout(() => {
             new QRCode(document.getElementById("qrcode-canvas"), {
                 text: code,
-                width: 150,
-                height: 150,
+                width: 200,
+                height: 200,
                 colorDark : "#000000",
                 colorLight : "#ffffff",
                 correctLevel : QRCode.CorrectLevel.H
             });
-        }, 100);
+        }, 150);
     },
 
-    doPrintQRCode() {
-        const printContent = document.getElementById('qrcode-print-area').innerHTML;
-        const win = window.open('', '', 'height=500,width=500');
-        win.document.write('<html><head><title>Print QR Code</title>');
-        win.document.write('<style>body{font-family:sans-serif; text-align:center; padding:20px;} img{margin: 0 auto;}</style>');
-        win.document.write('</head><body>');
-        win.document.write(printContent);
-        win.document.write('</body></html>');
-        win.document.close();
-        win.focus();
-        setTimeout(() => {
-            win.print();
-            win.close();
-        }, 500);
+    downloadQRCode(name, size) {
+        const btn = document.getElementById('qr-download-btn');
+        const originalHTML = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+        btn.disabled = true;
+
+        const area = document.getElementById('qrcode-download-area');
+        
+        html2canvas(area, {
+            backgroundColor: '#ffffff',
+            scale: 3, // Very high quality for printing later
+            logging: false,
+            useCORS: true
+        }).then(canvas => {
+            const link = document.createElement('a');
+            link.download = `QR-${name.replace(/\s+/g, '-').toLowerCase()}-${size.replace(/\s+/g, '-').toLowerCase()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            
+            btn.innerHTML = '<i class="fa-solid fa-check"></i> Saved to Gallery';
+            this.showToast('QR Image Downloaded');
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+                btn.disabled = false;
+            }, 2000);
+        }).catch(err => {
+            console.error(err);
+            this.showToast('Download Error');
+            btn.innerHTML = originalHTML;
+            btn.disabled = false;
+        });
     },
+
 
     doFullSeed() {
         if (confirm('This will load 200+ common items into your inventory. Continue?')) {
