@@ -361,13 +361,30 @@ h1, h2, h3, .nav-item span {
 .badge-warning { background-color: var(--warning); color: white; }
 .badge-success { background-color: var(--success); color: white; }
 
-/* Scanner */
+/* Scanner & Loading */
 #reader {
     width: 100%;
     border-radius: var(--radius-md);
     overflow: hidden;
     margin-top: 1rem;
 }
+
+.spinner {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border: 3px solid rgba(255,255,255,.3);
+    border-radius: 50%;
+    border-top-color: #fff;
+    animation: spin 1s ease-in-out infinite;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
 
 /* RTL Specific Overrides */
 body.rtl .form-group label {

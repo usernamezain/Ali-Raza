@@ -70,7 +70,11 @@ const i18n = {
         share_whatsapp: "Share WhatsApp",
         whatsapp_ur: "WhatsApp (Urdu)",
         walkin: "Walk-in Customer",
-        nav_history: "History"
+        nav_history: "History",
+        fetching_details: "Fetching details...",
+        item_not_found_smart: "Item not found. Would you like to add it?",
+        smart_add_title: "Add New Product",
+        quick_add_success: "Product added to inventory & bill."
     },
     ur: {
         app_title: "علی رضا کریانہ",
@@ -107,9 +111,34 @@ const i18n = {
         share_whatsapp: "واٹس ایپ شیئر",
         whatsapp_ur: "واٹس ایپ (اردو)",
         walkin: "عام گاہک",
-        nav_history: "تاریخ"
+        nav_history: "تاریخ",
+        fetching_details: "تفصیلات تلاش کی جا رہی ہیں...",
+        item_not_found_smart: "آئٹم نہیں ملا۔ کیا آپ اسے شامل کرنا چاہتے ہیں؟",
+        smart_add_title: "نئی پروڈکٹ شامل کریں",
+        quick_add_success: "پروڈکٹ انوینٹری اور بل میں شامل کر دی گئی۔"
     }
 };
+
+// --- API HELPERS ---
+async function fetchProductDetails(barcode) {
+    try {
+        const response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${barcode}.json`);
+        const data = await response.json();
+        if (data.status === 1) {
+            return {
+                name: data.product.product_name || "Unknown Product",
+                brand: data.product.brands || "",
+                category: data.product.categories ? data.product.categories.split(',')[0] : "Grocery & Staples",
+                found: true
+            };
+        }
+        return { found: false };
+    } catch (err) {
+        console.error("API Error:", err);
+        return { found: false };
+    }
+}
+
 
 /**
  * Ali Raza Kiryana Store POS - Core Application Logic
@@ -1052,8 +1081,8 @@ const UI = {
     },
 
 
-    handleScanResult(target, scanResult) {
-        const barcode = scanResult.trim(); // Trim whitespace to prevent "not found"
+    async handleScanResult(target, scanResult) {
+        const barcode = scanResult.trim();
         
         if (target === 'bill') {
             const products = store.get('products');
@@ -1062,7 +1091,6 @@ const UI = {
             
             products.forEach(p => {
                 p.variants.forEach(v => {
-                    // Using String() comparison to ensure types match
                     if (String(v.barcode).trim() === barcode) {
                         found = p;
                         variantMatched = v;
@@ -1074,15 +1102,93 @@ const UI = {
                 this.addToCart(found, variantMatched);
                 this.showToast(`Added ${found.name}`);
             } else {
-                this.showToast(`Item not found: ${barcode}`);
+                // SMART SCAN LOGIC
+                this.showToast(`<span class="spinner"></span>${this.t('fetching_details')}`);
+                const details = await fetchProductDetails(barcode);
+                this.showQuickAddModal(barcode, details);
             }
         } else if (target.startsWith('edit-p-barcode') || target.startsWith('p-barcode')) {
             this.showToast(`Scanned: ${barcode}`);
-            // Target the specific active input usually found by target ID or context
             const input = document.getElementById(target);
             if (input) input.value = barcode;
         }
     },
+
+    showQuickAddModal(barcode, details) {
+        const defaultName = details.found ? `${details.brand} ${details.name}`.trim() : "";
+        const categories = store.get('categories');
+        
+        this.showModal(this.t('smart_add_title'), `
+            <div class="card" style="background:var(--bg-main); margin-bottom:1rem; border:1px dashed var(--primary);">
+                <p style="font-size:0.8rem; color:var(--primary); font-weight:700;">Barcode: ${barcode}</p>
+                ${details.found ? `<p style="font-size:0.75rem; color:var(--text-muted);">Found in Database: ${details.brand}</p>` : ''}
+            </div>
+            
+            <div class="form-group">
+                <label>Product Name</label>
+                <input type="text" id="qa-name" class="form-input" value="${defaultName}" placeholder="e.g. Lays Masala">
+            </div>
+            
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.75rem;">
+                <div class="form-group">
+                    <label>Price (Rs.)</label>
+                    <input type="number" id="qa-price" class="form-input" placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label>Stock</label>
+                    <input type="number" id="qa-stock" class="form-input" value="50">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Category</label>
+                <select id="qa-cat" class="form-select">
+                    ${categories.map(cat => `<option ${details.category === cat ? 'selected' : ''}>${cat}</option>`).join('')}
+                </select>
+            </div>
+
+            <button class="btn-primary" onclick="UI.saveQuickProduct('${barcode}')">Add to Inventory & Bill</button>
+        `);
+    },
+
+    saveQuickProduct(barcode) {
+        const name = document.getElementById('qa-name').value;
+        const price = parseFloat(document.getElementById('qa-price').value);
+        const stock = parseInt(document.getElementById('qa-stock').value) || 0;
+        const category = document.getElementById('qa-cat').value;
+
+        if (!name || isNaN(price)) {
+            return this.showToast('Please enter Name and Price');
+        }
+
+        const product = {
+            name,
+            category,
+            isWeighted: false,
+            variants: [{
+                size: 'Standard',
+                price,
+                stock,
+                minStock: 5,
+                barcode
+            }]
+        };
+
+        const savedProduct = store.addProduct(product);
+        
+        // Also add to current cart if in billing view
+        if (this.currentView === 'billing') {
+            this.addToCart(savedProduct, savedProduct.variants[0]);
+        }
+
+        this.hideModal();
+        this.showToast(this.t('quick_add_success'));
+        
+        if (this.currentView === 'products') {
+            this.renderView('products');
+        }
+    },
+
 
 
     updateProduct(id) {
